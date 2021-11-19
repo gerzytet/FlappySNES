@@ -196,7 +196,7 @@ Start: {
   sta.w REG_NMITIMEN  ;enable NMI V-blank interrupt and auto-joypad read
   
   lda.b #$00
-  sep #%00010000 ;8 bit index registers
+  %x()
   ldx.b #$00
   ldy.b #$00
   }
@@ -237,7 +237,7 @@ Start: {
 	bne -
 	lda.w REG_JOY1L
 	
-	rep #%00010000 ;16 bit index registers
+	%X()
 	and #$80
 	beq + ;if a is not pressed, jump over
 	  lda.w IsPressed
@@ -254,7 +254,7 @@ Start: {
 	stz.w IsPressed
 	++
 	
-	rep #%00100000 ;16 bit a register
+	%A()
 	
 	lda.w BirdV
 	clc
@@ -266,8 +266,7 @@ Start: {
 	sta.w BirdY
 	xba
 	
-	sep #%00010000 ;8 bit index registers
-	sep #%00100000 ;8 bit a register
+	%ax()
 	
 	jsr HandleCollision_ax
 	
@@ -327,7 +326,7 @@ DrawPipe_aX: {
   and #$F0 ;isolate top length
   
   lsr #$4
-  rep #%00100000 ; 16-bit a register
+  %A()
   and #$00FF
   tay ;y = a
   
@@ -361,10 +360,10 @@ DrawPipe_aX: {
   
   ;recall gap length
   lda.w #$0000 ;reset a
-  sep #%00100000
+  %a()
   pla
   and #$0F
-  rep #%00100000 ; 16-bit a register
+  %A()
   tay
   
   .DrawGap:
@@ -404,7 +403,7 @@ DrawPipe_aX: {
 	  bcc .DrawBottom
   
   lda.w #$0000
-  sep #%00100000 ;8 bit a register
+  %a()
   rts
 }
 
@@ -479,10 +478,10 @@ DoPipeUpdates_ax: {
   sta.w PipeData,x
   
   tyx
-  rep #%00010000 ; 16-bit index register
+  %X()
   ldy.w #$0000
   jsr DrawPipe_aX
-  sep #%00010000 ; 8-bit index register
+  %x()
   
   ldx.b #$01
   stx.w PendingPipeUpdate
@@ -500,7 +499,7 @@ WritePipeUpdates_ax: {
 
   ldx.w NextPipeIndex
   lda.w PipeData,x ;get x position
-  rep #%00110000 ;16 bit all registers
+  %AX()
   and #$00FF
   tax
   
@@ -543,7 +542,7 @@ WritePipeUpdates_ax: {
   adc #$0002
   sta.w NextPipeIndex
   lsr
-  sep #%00110000 ;8 bit all registers
+  %ax()
   cmp NPipes
   bne +
     stz.w NextPipeIndex
