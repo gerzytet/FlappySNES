@@ -12,8 +12,10 @@ endmacro
 incsrc "LIB/SNES.asm"        ; Include SNES Definitions
 incsrc "LIB/SNES_HEADER.asm" ; Include Header & Vector Table
 incsrc "LIB/SNES_GFX.asm"    ; Include Graphics Macros
+incsrc "macros.asm"
 
 ; Variable Data
+{
 %seek(WRAM) ; 8Kb WRAM Mirror ($0000..$1FFF)
 TileMap:
   ;mirror of first 1k of BG1 tilemap starts here
@@ -31,9 +33,9 @@ NPipes:
 PipeData:
   fill $0C ;12 bytes
 ;other variables
-ScrollXH:
-  db $00
 ScrollXL:
+  db $00
+ScrollXH:
   db $00
 BirdY:
   dw $0000
@@ -49,9 +51,22 @@ PendingPipeUpdate:
   db $00   ;1 if the pipe in NextPipeIndex has been resized and needs to be rewritten
 Temp:
   dw $0000
+IsCollision:
+  db $00
+}
+; constants
+{
+!BIRD_ACCELERATION_16 = $0012
+!BIRD_X_OFFSET_8 = $32
+!BIRD_X_OFFSET_16 = $0032
+!BIRD_SPRITE_WIDTH_16 = $0010
+!PIPE_WIDTH_16 = $001A
+!PIPE_PADDING_16 = $0003
+}
 
 %seek($8000)
-Start:
+Start: {
+
   %SNES_INIT(!SLOWROM) ; Run SNES Initialisation Routine
   
   %LoadPAL(PipesPalFile, $00, datasize(PipesPalFile), 0)
@@ -124,48 +139,48 @@ Start:
   lda.b #$02 ;s = 1, X = 0
   sta.w REG_OAMDATA
   
-  SetupPipesData: ;some default data
+  .SetupPipesData: ;some default data
     lda.b #$06
 	sta.w NPipes ;6 pipes
 	
-	;macro SETPIPE(ID, X, LENPOS) {
+	;macro SETPIPE(ID, X, LENPOS) 
 	;  lda.b {X}
 	;  sta.w PipeData + {ID} << 1
 	;  lda.b {LENPOS}
 	;  sta.w PipeData + {ID} << 1 + 1
 	;}
 	
-	lda.b #$0008 ;x = 8
+	lda.b #$08 ;x = 8
     sta.w PipeData	
 	lda.b #$25 ;len = 2, gap = 5
 	sta.w PipeData+1
 	
-	lda.b #$0012 ;x = 18
+	lda.b #$12 ;x = 18
 	sta.w PipeData+2
 	lda.b #$35 ;len = 3, gap = 5
 	sta.w PipeData+3
 	
-	lda.b #$001c ;x = 28
+	lda.b #$1c ;x = 28
     sta.w PipeData+4
 	lda.b #$54 ;len = 5, gap = 4
 	sta.w PipeData+5
 	
-	lda.b #$0026 ;x = 38
+	lda.b #$26 ;x = 38
     sta.w PipeData+6
 	lda.b #$84 ;len = 8, gap = 4
 	sta.w PipeData+7
 	
-	lda.b #$002E ;x = 46
+	lda.b #$2E ;x = 46
     sta.w PipeData+8
 	lda.b #$74 ;len = 7, gap = 4
 	sta.w PipeData+9
 	
-	lda.b #$0038 ;x = 56
+	lda.b #$38 ;x = 56
 	sta.w PipeData+10
 	lda.b #$64 ;len = 6, gap = 4
 	sta.w PipeData+11
 
-  jsr DrawAllPipes
+  jsr DrawAllPipes_ax
   
   ;transfer $400 bytes from TileMap ($0000) to BG1 tile map ($0400, but apparently it only works if I put $800? odd.)
   ;answer: because, $400 is the word address, and $800 is the byte address.
@@ -184,9 +199,9 @@ Start:
   sep #%00010000 ;8 bit index registers
   ldx.b #$00
   ldy.b #$00
-  
-  MainLoop:
-    jsr AdvanceRNG
+  }
+  MainLoop: {
+    jsr AdvanceRNG_ao
 	
 	lda.w ScrollXL
 	inc
@@ -199,16 +214,22 @@ Start:
 	  jmp +
 	+
 	
-	jsr DoPipeUpdates
+	jsr DoPipeUpdates_ax
+	
+	%A()
+	jsr CollisionCheck_Ax
+	%a()
 	
     wai
+	
+	
 	
 	lda.w ScrollXL
 	sta.w REG_BG1HOFS
 	lda.w ScrollXH
 	sta.w REG_BG1HOFS
     
-	jsr WritePipeUpdates
+	jsr WritePipeUpdates_ax
 	
 	-
 	lda.w REG_HVBJOY
@@ -233,12 +254,11 @@ Start:
 	stz.w IsPressed
 	++
 	
-	!BIRD_ACCELERATION = $0012
 	rep #%00100000 ;16 bit a register
 	
 	lda.w BirdV
 	clc
-	adc #!BIRD_ACCELERATION
+	adc #!BIRD_ACCELERATION_16
 	sta.w BirdV
 	lda.w BirdY
 	clc
@@ -249,22 +269,25 @@ Start:
 	sep #%00010000 ;8 bit index registers
 	sep #%00100000 ;8 bit a register
 	
+	jsr HandleCollision_ax
+	
 	stz.w REG_OAMADDH ;OAM address = $00...
     stz.w REG_OAMADDL ;00
 	
-	ldx.b #$32
+	ldx.b #!BIRD_X_OFFSET_8
 	stx.w REG_OAMDATA ;x = 50
 	sta.w REG_OAMDATA ;y = a
   jmp MainLoop
-  
+}
+
   VBlank:
     rti
 
-Loop:
-  jmp Loop
+.Loop:
+  jmp .Loop
 
 ;assumes 8 bit accumulator
-AdvanceRNG:
+AdvanceRNG_ao: {
   lda.w RNG
   asl
   asl
@@ -272,14 +295,14 @@ AdvanceRNG:
   inc
   sta.w RNG
   rts
-
+}
 ;draw all pipes from memory
 ;destroys a, x, and y
-DrawAllPipes:
+DrawAllPipes_ax: {
   lda.w NPipes
   asl
   tay
-  PipeLoop:
+  .PipeLoop:
     dey
 	dey
 	lda.w PipeData,y      ;x coordinate
@@ -287,18 +310,19 @@ DrawAllPipes:
 	lda.w PipeData+1,y    ;top length/gap
 	
 	phy
-	jsr DrawPipe
+	jsr DrawPipe_aX
 	ply
 	cpy #$0000
-	bne PipeLoop
+	bne .PipeLoop
   rts
+}
 
 ;subroutine DrawPipe
 ;args:
 ;  a: top length, gap length
 ;  x: x coordinate
 ;expects 16 bit index registers, and y=0
-DrawPipe:
+DrawPipe_aX: {
   pha     ;backup a
   and #$F0 ;isolate top length
   
@@ -307,8 +331,8 @@ DrawPipe:
   and #$00FF
   tay ;y = a
   
-  jmp YTest
-  DrawTop:
+  jmp .YTest
+  .DrawTop:
       dey
 	  lda.w #$0002 ;tile 1
 	  sta.w TileMap,x
@@ -321,10 +345,10 @@ DrawPipe:
 	  
 	  jsr NextRow
 	  
-  YTest:
+  .YTest:
 	  cpy.w #$0000
-	  bne DrawTop
-  DrawTopTip:
+	  bne .DrawTop
+  .DrawTopTip:
       lda.w #$0004 ;tile 2
 	  sta.w TileMap,x
 	  inx
@@ -343,7 +367,7 @@ DrawPipe:
   rep #%00100000 ; 16-bit a register
   tay
   
-  DrawGap:
+  .DrawGap:
       dey
 	  lda.w #$0000
 	  sta.w TileMap,x
@@ -354,8 +378,8 @@ DrawPipe:
 	  inx
 	  jsr NextRow
 	  cpy #$0000
-	  bne DrawGap 
-  DrawBottomTip:
+	  bne .DrawGap 
+  .DrawBottomTip:
       lda.w #$8004 ;tile 2, v flip
 	  sta.w TileMap,x
 	  inx
@@ -365,7 +389,7 @@ DrawPipe:
 	  inx
 	  inx
 	  jsr NextRow
-  DrawBottom:
+  .DrawBottom:
       lda.w #$0002 ;tile 1
 	  sta.w TileMap,x
 	  inx
@@ -377,14 +401,15 @@ DrawPipe:
 	  jsr NextRow
 	  
 	  cpx #$0400
-	  bcc DrawBottom
+	  bcc .DrawBottom
   
   lda.w #$0000
   sep #%00100000 ;8 bit a register
   rts
+}
 
 ;adds 60 to x.  helper for DrawPipe
-NextRow:
+NextRow: {
   ;jump to next row - 4 by adding 60 to x
   pha ;backup a
   txa ;a = x
@@ -393,8 +418,9 @@ NextRow:
   tax ;x = a
   pla
   rts
+}
 ;adds 64 to x.  helper for DrawPipe
-NextRowFull:
+NextRowFull: {
   ;jump to next row by adding 64 to x
   pha ;backup a
   txa ;a = x
@@ -403,9 +429,9 @@ NextRowFull:
   tax ;x = a
   pla
   rts
-
+}
 ;destroys a and x and y
-DoPipeUpdates:
+DoPipeUpdates_ax: {
   ;tile index = scroll index / 16
   lda.w ScrollXL
   bit #$0F
@@ -455,17 +481,17 @@ DoPipeUpdates:
   tyx
   rep #%00010000 ; 16-bit index register
   ldy.w #$0000
-  jsr DrawPipe
+  jsr DrawPipe_aX
   sep #%00010000 ; 8-bit index register
   
   ldx.b #$01
   stx.w PendingPipeUpdate
   rts
-
+}
 ;destroys a, x, and y
 ;returns 8 bit a and index
 ;writes changes to the next pipe index from tilemap to BG1
-WritePipeUpdates:
+WritePipeUpdates_ax: {
   ldx.w PendingPipeUpdate
   bne +
     rts
@@ -522,7 +548,107 @@ WritePipeUpdates:
   bne +
     stz.w NextPipeIndex
   +
+  rts 
+}
+CollisionCheck_Ax: {
+  stz.w IsCollision
+  phy
+  ldy.w NPipes
+  -
+    dey
+	tyx
+    jsr IsCollidingHelper_Ax
+    cpy #$00
+  bne -
+  ply
   rts
+}
+; test if the bird is on top of a given pipe
+; pipe index to check in x
+IsCollidingHelper_Ax: {
+  ; get screen x
+  ; add flappy x
+  ; add flappy sprite width
+  ; mod to 9 bit value
+  ; last pixel = value
+  ; get tile index of pipe
+  ; multiply by 8
+  ; if last pixel >= tile pixel index
+  ;   last pixel -= sprite width
+  ;   if last pixel < tile pixel index
+  ;     yes collision
+  ;   tile pixel index += pipe width
+  ;   if last pixel < tile pixel index
+  ;     yes collision
+  ;TODO: y test
+  pha
+  
+  txa
+  clc
+  asl
+  tax
+  
+  lda.w ScrollXL
+  clc
+  adc #!BIRD_X_OFFSET_16
+  adc #!BIRD_SPRITE_WIDTH_16
+  and #$01FF
+  sta.w Temp
+  lda.w PipeData,x
+  and #$00FF
+  clc
+  asl
+  asl
+  asl
+  adc #!PIPE_PADDING_16
+  cmp Temp ;tile index - sprite, possible collision if negative or zero
+  bpl .NoCollision
+    pha
+	lda.w Temp
+	sec
+	sbc #!BIRD_SPRITE_WIDTH_16
+	sta.w Temp
+	pla
+	
+	cmp Temp ;beginning of tile - beginning of bird, positive or zero means collision
+    bmi +
+	  jmp .Collision
+    +
+	
+	clc
+	adc #!PIPE_WIDTH_16-1
+	cmp Temp ; end of tile - beginning of bird, positive or zero means collision
+	bmi +
+	  jmp .Collision
+	+
+	
+  .NoCollision:
+  pla
+  rts
+  .Collision
+  pla
+  ldx.b #$01
+  stx.w IsCollision
+  rts
+}
+HandleCollision_ax: {
+  pha
+  stz.w REG_OAMADDH
+  lda.b #$01
+  sta.w REG_OAMADDL
+  
+  lda.w IsCollision
+  ;vhoopppN, no hv flip, priority = 3, sprite pallete 0 or 1, no name
+  clc
+  asl
+  ora #$30
+  stz.w REG_OAMDATA
+  sta.w REG_OAMDATA
+  
+  pla
+  rts
+}
+
 
 ;tiles
 ;BANK 1
