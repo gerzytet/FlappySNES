@@ -23,9 +23,8 @@ TileMap:
   fill $400
 ;record format:
 ;for each n pipes (where n = NPipes)
-;  1 byte x position (0..63)
-;  4 bits y position of the top from the top (0..15), 4 bits gap length
-;  all units in tiles
+;  1 byte x position (0..63), in 8x8 tiles
+;  4 bits y position of the top from the top (0..15), 4 bits gap length, in 16x16 tiles
 ;I'll assume a limit of 6 pipes
 ;pipe data size, 6 * 2 bytes
 NPipes:
@@ -51,6 +50,8 @@ PendingPipeUpdate:
   db $00   ;1 if the pipe in NextPipeIndex has been resized and needs to be rewritten
 Temp:
   dw $0000
+Temp2:
+  dw $0000
 IsCollision:
   db $00
 }
@@ -62,6 +63,7 @@ IsCollision:
 !BIRD_SPRITE_WIDTH_16 = $0010
 !PIPE_WIDTH_16 = $001A
 !PIPE_PADDING_16 = $0003
+!BIRD_HEIGHT_16 = $000E ;this isn't the true value.  had to make it bigger to fix collision
 }
 
 %seek($8000)
@@ -611,23 +613,84 @@ IsCollidingHelper_Ax: {
 	
 	cmp Temp ;beginning of tile - beginning of bird, positive or zero means collision
     bmi +
-	  jmp .Collision
+	  jmp .XCollision
     +
 	
 	clc
 	adc #!PIPE_WIDTH_16-1
 	cmp Temp ; end of tile - beginning of bird, positive or zero means collision
 	bmi +
-	  jmp .Collision
+	  jmp .XCollision
 	+
 	
   .NoCollision:
   pla
   rts
-  .Collision
+  .XCollision:
+  ; coordinates are measures from top
+  ; load top length, gap length
+  ; mask out gap length (a = top length * 16)
+  ; add 16 (account for bottom tip)
+  ; subtract 1 (a = last pixel before gap)
+  ; pha
+  ; load BirdY
+  ; mask low byte, divide if necessary (a = top pixel of bird)
+  ; Temp = a
+  ; pla
+  ; if top bird pixel (Temp) <= last pixel before gap (a):
+  ;   collision
+  ; pha
+  ; load temp
+  ; add height of bird-1
+  ; store to Temp
+  ; pla
+  ; Temp2 = a
+  ; load length, gap length
+  ; mask out top length (a = gap length)
+  ; multiply by 16
+  ; add Temp2
+  ; add 1
+  ; if bottom bird pixel (Temp) >= first pixel after gap(a)
+  ;  collision
+  
+  lda.w PipeData+1,x
+  and #$00F0
+  clc
+  adc #$000F
+  pha
+  lda.w BirdY
+  and #$FF00
+  xba
+  sta.w Temp
   pla
+  cmp Temp ;top bird pixel - last pixel before gap.  positive or zero = collision
+  bmi +
+    jmp .YCollision
+  +
+  pha
+  lda.w Temp
+  clc
+  adc #!BIRD_HEIGHT_16-1
+  sta.w Temp
+  pla
+  sta.w Temp2
+  lda.w PipeData+1,x
+  and #$000F
+  clc
+  asl #4
+  adc Temp2
+  inc
+  cmp Temp ;negative or zero is collision
+  bpl +
+    jmp .YCollision
+  +
+  .NoCollision2:
+  pla
+  rts
+  .YCollision:
   ldx.b #$01
   stx.w IsCollision
+  pla
   rts
 }
 HandleCollision_ax: {
